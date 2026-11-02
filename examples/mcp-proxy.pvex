@@ -1,0 +1,21 @@
+# A pvex spec file: plain bash assignments, sourced on the Proxmox host.
+#
+#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/jellyhuck/pvex/main/ct/pvex.sh)" -- ./mcp-proxy.pvex
+#
+# Variables already set in the environment win over this file.
+
+PVEX_RUNNER=uvx
+PVEX_PACKAGE="mcp-proxy==0.8.2"
+PVEX_PORT=8096
+PVEX_ARGS="--host 0.0.0.0 --port 8096 --named-server-config /etc/mcp-proxy/servers.json"
+
+# Files from this directory (or URLs) placed into the container. The source is
+# resolved relative to where you run the command.
+PVEX_FILES="./mcp-proxy-servers.json:/etc/mcp-proxy/servers.json"
+
+# Environment for the app only (newline or ';' separated).
+PVEX_ENV="LOG_LEVEL=info"
+
+# Optional: OS packages and hooks for anything the generic installer cannot know.
+# PVEX_PACKAGES="ffmpeg"
+# PVEX_POST_INSTALL="./post-install.sh"

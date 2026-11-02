@@ -1,0 +1,152 @@
+#!/usr/bin/env bash
+# pvex-run: the one command the pvex service runs.
+#
+# Reads /etc/pvex/pvex.conf, loads /etc/pvex/app.env and execs the configured
+# runner:
+#   npx  -y [--package PKG -- CMD | PKG] ARGS...
+#   bunx    [--package PKG    CMD | PKG] ARGS...
+#   uvx     [--from    PKG    CMD | PKG] ARGS...
+#
+# systemd and OpenRC both point at this file, so changing pvex.conf (or this
+# wrapper) never means touching a service unit.
+#
+#   pvex-run                 run the app (what the service does)
+#   pvex-run -- ARGS...      run the app with ARGS appended to PVEX_ARGS
+#   pvex-run --only ARGS...  run the app with ARGS instead of PVEX_ARGS
+#   pvex-run --check         resolve and download the package without starting it
+#
+# Started as root (a hook, a shell), it re-executes itself as the service user
+# so nothing under /var/lib/pvex ends up owned by root.
+#
+# PVEX_DRY_RUN=1 prints the command, one argument per line, instead of running it.
+# PVEX_CONF, PVEX_ENV_FILE and PVEX_HOME can be overridden; the tests rely on that.
+set -euo pipefail
+
+PVEX_CONF="${PVEX_CONF:-/etc/pvex/pvex.conf}"
+PVEX_ENV_FILE="${PVEX_ENV_FILE:-/etc/pvex/app.env}"
+PVEX_USER="${PVEX_USER:-pvex}"
+
+if [[ $EUID -eq 0 ]] && id -u "$PVEX_USER" >/dev/null 2>&1 && [[ "$(id -u "$PVEX_USER")" != 0 ]]; then
+  self="$(readlink -f "${BASH_SOURCE[0]}")"
+  # su keeps the environment (minus HOME, which is set again below); the
+  # arguments are re-quoted so they survive the -c string.
+  exec su -s /bin/bash "$PVEX_USER" -c "exec $(printf '%q ' "$self" "$@")"
+fi
+
+if [[ ! -r "$PVEX_CONF" ]]; then
+  echo "pvex-run: $PVEX_CONF is missing or unreadable" >&2
+  exit 78 # EX_CONFIG
+fi
+# shellcheck disable=SC1090
+source "$PVEX_CONF"
+
+export HOME="${PVEX_HOME:-/var/lib/pvex}"
+export XDG_CACHE_HOME="$HOME/.cache"
+export XDG_DATA_HOME="$HOME/.local/share"
+export TMPDIR="$HOME/.tmp"
+# bun caches under $BUN_INSTALL/install/cache unless told otherwise, and
+# /opt/bun belongs to root.
+export BUN_INSTALL="${BUN_INSTALL:-/opt/bun}"
+export BUN_INSTALL_CACHE_DIR="$HOME/.bun/install/cache"
+# uv's managed Pythons: the same place the installer put them.
+export UV_PYTHON_INSTALL_DIR="$HOME/.local/share/uv/python"
+if [[ -n "${PVEX_PYTHON_VERSION:-}" ]]; then
+  export UV_PYTHON="${UV_PYTHON:-$PVEX_PYTHON_VERSION}"
+fi
+export PATH="/usr/local/bin:/usr/bin:/bin:$BUN_INSTALL/bin${PATH:+:$PATH}"
+export NPM_CONFIG_UPDATE_NOTIFIER=false
+export NO_UPDATE_NOTIFIER=1
+mkdir -p "$XDG_CACHE_HOME" "$TMPDIR" 2>/dev/null || true
+cd "$HOME"
+
+# The app's environment, the same whether systemd, OpenRC, a hook or a shell
+# started this. Entries are shell assignments (the installer quotes them).
+if [[ -r "$PVEX_ENV_FILE" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$PVEX_ENV_FILE"
+  set +a
+fi
+
+mode=run
+use_conf_args=1
+case "${1:-}" in
+--check)
+  mode=check
+  shift
+  ;;
+--only)
+  use_conf_args=0
+  shift
+  [[ "${1:-}" == "--" ]] && shift
+  ;;
+--)
+  shift
+  ;;
+esac
+
+runner="${PVEX_RUNNER:-}"
+package="${PVEX_PACKAGE:-}"
+command_="${PVEX_COMMAND:-}"
+if [[ -z "$runner" || -z "$package" ]]; then
+  echo "pvex-run: PVEX_RUNNER and PVEX_PACKAGE must be set in $PVEX_CONF" >&2
+  exit 78
+fi
+
+# PVEX_ARGS is admin-provided and may carry quotes ("--name 'My App'"), so it is
+# parsed like a shell command line rather than split on whitespace.
+extra=()
+if [[ $use_conf_args -eq 1 && -n "${PVEX_ARGS:-}" ]]; then
+  eval "extra=(${PVEX_ARGS})"
+fi
+
+argv=()
+case "$runner" in
+npx)
+  argv=(npx -y)
+  if [[ "$mode" == check ]]; then
+    argv+=(--package "$package" -c 'exit 0')
+  elif [[ -n "$command_" ]]; then
+    argv+=(--package "$package" -- "$command_")
+  else
+    argv+=("$package")
+  fi
+  ;;
+bunx)
+  argv=(bunx)
+  if [[ "$mode" == check ]]; then
+    # Installs the package, then runs /bin/true instead of its binary. A
+    # missing package or version exits non-zero.
+    argv+=(--package "$package" true)
+  elif [[ -n "$command_" ]]; then
+    argv+=(--package "$package" "$command_")
+  else
+    argv+=("$package")
+  fi
+  ;;
+uvx)
+  argv=(uvx)
+  if [[ "$mode" == check ]]; then
+    argv+=(--from "$package" python -c pass)
+  elif [[ -n "$command_" ]]; then
+    argv+=(--from "$package" "$command_")
+  else
+    argv+=("$package")
+  fi
+  ;;
+*)
+  echo "pvex-run: unknown PVEX_RUNNER '$runner' (expected npx, bunx or uvx)" >&2
+  exit 78
+  ;;
+esac
+
+if [[ "$mode" == run ]]; then
+  argv+=("${extra[@]}" "$@")
+fi
+
+if [[ "${PVEX_DRY_RUN:-0}" == 1 ]]; then
+  printf '%s\n' "${argv[@]}"
+  exit 0
+fi
+
+exec "${argv[@]}"
