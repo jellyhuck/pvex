@@ -1,13 +1,16 @@
 # pvex
 
 Deploy any `npx`, `bunx` or `uvx` app as a Proxmox VE LXC container, using the
-[community-scripts](https://github.com/community-scripts/ProxmoxVE) engine. One
-generic script pair builds a small container for the package, runs it as a
-service under an unprivileged user, and keeps it updatable with the usual
-`update` command.
+[community-scripts](https://github.com/community-scripts/ProxmoxVE) engine. This
+repo's script builds a small container for the package, runs it as a service,
+and keeps it updatable with the usual `update` command.
+
+## Minimal Example
 
 Ever wanted to wrap `npx -y my-app` into an LXC container that you can simply
-`update`? On a Proxmox VE host:
+`update`?
+
+On a Proxmox VE host:
 
 ```bash
 PVEX_RUNNER=npx PVEX_PACKAGE=my-app PVEX_PORT=3000 \

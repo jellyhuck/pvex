@@ -8,6 +8,7 @@
 # Generic installer: everything app-specific arrives as PVEX_* variables
 # exported by ct/pvex.sh on the host (lxc-attach keeps the environment).
 
+# shellcheck source=/dev/null
 source /dev/stdin <<<"$FUNCTIONS_FILE_PATH"
 color
 verb_ip6

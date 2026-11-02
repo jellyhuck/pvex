@@ -324,6 +324,7 @@ pvex_update_common() {
   if [[ "${PVEX_RERUN_HOOKS:-0}" == "1" ]]; then
     pvex_run_hook pre
   fi
+  pvex_install_extra_packages
   pvex_setup_runtime
   pvex_install_wrapper
   if [[ "${PVEX_RERUN_HOOKS:-0}" == "1" ]]; then
