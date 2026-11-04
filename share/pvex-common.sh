@@ -103,12 +103,37 @@ pvex_setup_uv() {
   # the same directory.
   export UV_PYTHON_INSTALL_DIR="$PVEX_UV_PYTHON_DIR"
   install -d -m 0755 "$PVEX_UV_PYTHON_DIR"
+  # setup_uv installs /usr/local/bin/uv only. The Debian engine adds a uvx
+  # wrapper when USE_UVX=YES; the Alpine engine has no such option.
+  export USE_UVX=YES
   if [[ -n "${PVEX_PYTHON_VERSION:-}" ]]; then
     PYTHON_VERSION="$PVEX_PYTHON_VERSION" setup_uv
   else
     setup_uv
   fi
+  pvex_ensure_uvx
   pvex_own_home
+}
+
+# pvex-run execs `uvx`, which is `uv tool run`. Whichever engine installed uv,
+# make sure a uvx exists where pvex-run's PATH (not root's) will find it.
+pvex_ensure_uvx() {
+  local uvx="/usr/local/bin/uvx"
+  if [[ -x "$uvx" || -x /usr/bin/uvx ]]; then
+    return 0
+  fi
+  if [[ ! -x /usr/local/bin/uv ]]; then
+    msg_error "uv is not installed in /usr/local/bin; cannot provide uvx"
+    return 1
+  fi
+  msg_info "Installing uvx wrapper"
+  cat >"$uvx" <<'EOF_UVX'
+#!/bin/sh
+# uvx: `uv tool run`, for engines that install uv without it. Written by pvex.
+exec /usr/local/bin/uv tool run "$@"
+EOF_UVX
+  chmod 0755 "$uvx"
+  msg_ok "Installed uvx wrapper"
 }
 
 # Everything under the service user's home belongs to the service user. The
